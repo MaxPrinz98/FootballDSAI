@@ -79,7 +79,7 @@ def calculate_elo_ratings(MATCHES, K_FACTOR=30., SCALING_FACTOR = 400., HOME_ADV
         })
 
 
-    return team_stats.reset_index().sort_values('elo_rating', ascending=False), pd.DataFrame(elo_history)
+    return team_stats.sort_values('elo_rating', ascending=False).reset_index(), pd.DataFrame(elo_history)
 
 def loss_from_comparing_tables(actual_standings,elo_standing):
     total_loss = 0
