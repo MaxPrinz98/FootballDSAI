@@ -2,11 +2,11 @@ import pandas as pd
 from datetime import timedelta
 import matplotlib.pyplot as plt
 
-def initialize_team_stats(matches):
+def initialize_team_stats(matches, starting_elo = 2000):
     unique_teams = pd.concat([matches['home_team'], matches['away_team']]).unique()
     return pd.DataFrame({
         'team': unique_teams,
-        'elo_rating': 2000,
+        'elo_rating': starting_elo,
         'total_games': 0,
         'total_wins': 0,
         'total_draws': 0,
@@ -16,7 +16,7 @@ def initialize_team_stats(matches):
     }).set_index('team')
 
 
-def calculate_elo_ratings(team_stats, matches, K_FACTOR=30, HOME_ADVANTAGE=0.02):
+def calculate_elo_ratings(team_stats, matches, K_FACTOR=30, HOME_ADVANTAGE=0.00):
     elo_ratings = team_stats['elo_rating'].copy()
     elo_history = []
     
@@ -72,3 +72,13 @@ def calculate_elo_ratings(team_stats, matches, K_FACTOR=30, HOME_ADVANTAGE=0.02)
         })
     
     return elo_ratings, pd.DataFrame(elo_history)
+
+def loss_from_comparing_tables(actual_standings,elo_standing):
+    total_loss = 0
+    elo_standings_tmp = elo_standing.copy().reset_index()
+    for index , row in elo_standings_tmp.iterrows():
+        elo_team_name = row['team']
+        index_actual = actual_standings[actual_standings['team']==elo_team_name].index[0]
+        index_elo = index
+        total_loss += abs(index_elo - index_actual)
+    return total_loss
