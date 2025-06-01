@@ -5,6 +5,7 @@ from datetime import timedelta
 import matplotlib.pyplot as plt
 from itertools import product
 
+
 def initialize_team_stats(matches, starting_elo = 2000):
     unique_teams = pd.concat([matches['home_team'], matches['away_team']]).unique()
     return pd.DataFrame({
@@ -106,8 +107,8 @@ def elo_three_way_probs(home_elo, away_elo, alpha, beta, gamma):
 
 
 # 2. Brier score computation per match week
-def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, base_elo=1000):
-    elo_ratings = {team: base_elo for team in pd.concat([matches['home_team'], matches['away_team']]).unique()}
+def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, R_0=1000,K=20):
+    elo_ratings = {team: R_0 for team in pd.concat([matches['home_team'], matches['away_team']]).unique()}
     brier_records = []
 
     # Sort matches by match week
@@ -144,7 +145,7 @@ def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, base_el
 
         # Optionally: Elo update (if you want to refine ratings)
         # Simplified update using K-factor
-        K = 20
+        
         elo_ratings[home] += K * (actual[0] - p_home)
         elo_ratings[away] += K * (actual[2] - p_away)
 
@@ -157,7 +158,7 @@ def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, base_el
 
 
 
-def elo_grid_search(matches, param_grid, loss_function, final_table):
+def elo_grid_search(matches, param_grid):
     results = []
     best_score = float('inf')
     best_params = None
@@ -169,26 +170,35 @@ def elo_grid_search(matches, param_grid, loss_function, final_table):
         params = dict(zip(keys, combination))
         
         # Run ELO calculation with current parameters
-        team_stats, _ = calculate_elo_ratings(
+        '''team_stats, _ = calculate_elo_ratings(
             matches,
             K_FACTOR = params.get('K_FACTOR', 1),
             HOME_ADVANTAGE = params.get('HOME_ADVANTAGE', 0),
             SCALING_FACTOR = params.get('SCALING_FACTOR', 400),
             STARTING_ELO = params.get('STARTING_ELO', 1000)
-        )
+        )'''
         
-        # Compute loss
-        current_loss = loss_function(final_table, team_stats)
+        # Compute loss average brier score 
+        
+        loss_df = brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
+                                            alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ) )
+        current_brier = 0
+        n = 0
+        for _,row in loss_df.iterrows():
+            current_brier += row['brier_score']
+            n += 1
+        current_brier = current_brier/n
+
         
         # Store results
         results.append({
             'params': params,
-            'loss': current_loss
+            'loss': current_brier
         })
         
         # Update best parameters if current loss is better
-        if current_loss < best_score:
-            best_score = current_loss
+        if current_brier < best_score:
+            best_score = current_brier
             best_params = params
     
     results_df = pd.DataFrame(results)
