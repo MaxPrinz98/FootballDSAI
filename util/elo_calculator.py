@@ -209,7 +209,7 @@ def elo_grid_search(matches, param_grid):
         # Compute loss average brier score 
         
         loss_df , _= brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
-                                            alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ),beta=params.get('beta',0.5) )
+                                            alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ),beta=params.get('beta',0.5) ,gamma=params.get('gamma',0.01))
         current_brier = 0
         n = 0
         for _,row in loss_df.iterrows():
