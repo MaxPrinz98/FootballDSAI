@@ -107,12 +107,17 @@ def elo_three_way_probs(home_elo, away_elo, alpha, beta, gamma):
 
 
 # 2. Brier score computation per match week
-def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, R_0=1000,K=20):
+def brier_scores_by_matchweek(matches, alpha=0.1, beta=0.5, gamma=0.1, R_0=1000.,K=20.):
     elo_ratings = {team: R_0 for team in pd.concat([matches['home_team'], matches['away_team']]).unique()}
     brier_records = []
-
+    elo_first_run , _= calculate_elo_ratings(MATCHES=matches,K_FACTOR=K,SCALING_FACTOR= (np.log(10)/alpha),STARTING_ELO=R_0)
     # Sort matches by match week
     matches = matches.sort_values(by='match_week')
+    match_probs = []
+    
+    for _,row in elo_first_run.iterrows():
+        team= row['team']
+        elo_ratings[team] = row['elo_rating']
 
     for _, match in matches.iterrows():
         home = match['home_team']
@@ -135,8 +140,25 @@ def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, R_0=100
         else:
             actual = [0, 0, 1]
 
+        if home_score > away_score:
+            actual_home = 1
+            actual_away = 0
+            
+        elif home_score < away_score:
+            actual_home = 0
+            actual_away = 1
+            
+        else:
+            actual_home = 0.5
+            actual_away = 0.5
+            
+            
+        # Update Elo ratings
         predicted = [p_home, p_draw, p_away]
-
+        home_elo_diff = K * (actual_home - p_home)
+        away_elo_diff = K * (actual_away - p_away)
+        elo_ratings[home] += home_elo_diff
+        elo_ratings[away] += away_elo_diff
         # Brier score for this match
         brier = np.sum((np.array(predicted) - np.array(actual)) ** 2)
 
@@ -146,14 +168,20 @@ def brier_scores_by_matchweek(matches, alpha=0.01, beta=1.0, gamma=0.01, R_0=100
         # Optionally: Elo update (if you want to refine ratings)
         # Simplified update using K-factor
         
-        elo_ratings[home] += K * (actual[0] - p_home)
-        elo_ratings[away] += K * (actual[2] - p_away)
+        #elo_ratings[home] += K * (actual[0] - p_home)
+        #elo_ratings[away] += K * (actual[2] - p_away)
+        match_probs.append({
+            'match_id' : match['match_id'],
+            'p_home':p_home,
+            'p_draw':p_draw,
+            'p_away':p_away
+        })
 
     # Create DataFrame and average per week
     brier_df = pd.DataFrame(brier_records)
     weekly_brier = brier_df.groupby('match_week')['brier_score'].mean().reset_index()
 
-    return weekly_brier
+    return weekly_brier,pd.DataFrame(match_probs)
 
 
 
@@ -180,8 +208,8 @@ def elo_grid_search(matches, param_grid):
         
         # Compute loss average brier score 
         
-        loss_df = brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
-                                            alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ) )
+        loss_df , _= brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
+                                            alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ),beta=params.get('beta',0.5) )
         current_brier = 0
         n = 0
         for _,row in loss_df.iterrows():
