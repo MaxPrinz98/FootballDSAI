@@ -155,8 +155,8 @@ def brier_scores_by_matchweek(matches, alpha=0.1, beta=0.5, gamma=0.1, R_0=1000.
             
         # Update Elo ratings
         predicted = [p_home, p_draw, p_away]
-        home_elo_diff = K * (actual_home - p_home)
-        away_elo_diff = K * (actual_away - p_away)
+        home_elo_diff = K * (actual_home - p_home - (p_draw/2.))
+        away_elo_diff = K * (actual_away - p_away - (p_draw/2.))
         elo_ratings[home] += home_elo_diff
         elo_ratings[away] += away_elo_diff
         # Brier score for this match
@@ -181,7 +181,7 @@ def brier_scores_by_matchweek(matches, alpha=0.1, beta=0.5, gamma=0.1, R_0=1000.
     brier_df = pd.DataFrame(brier_records)
     weekly_brier = brier_df.groupby('match_week')['brier_score'].mean().reset_index()
 
-    return weekly_brier,pd.DataFrame(match_probs)
+    return weekly_brier,pd.DataFrame(match_probs),elo_ratings
 
 
 
@@ -208,7 +208,7 @@ def elo_grid_search(matches, param_grid):
         
         # Compute loss average brier score 
         
-        loss_df , _= brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
+        loss_df , a,b= brier_scores_by_matchweek(matches = matches , K = params.get('K_FACTOR', 1),R_0=params.get('STARTING_ELO', 1000),
                                             alpha = (np.log(10) / params.get('SCALING_FACTOR', 400) ),beta=params.get('beta',0.5) ,gamma=params.get('gamma',0.01))
         current_brier = 0
         n = 0
