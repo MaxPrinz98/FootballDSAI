@@ -1,5 +1,7 @@
-
 import pandas as pd
+from numpy.typing import ArrayLike
+from typing import Optional
+import random
 
 def calculate_team_stats(event):
     """Calculate team statistics from events DataFrame and return merged stats."""
@@ -43,7 +45,7 @@ def calculate_team_stats(event):
                     .reset_index(name='completed_passes'))
 
 
-    starting_formations = event[event['type'] =='Starting XI'][['team', 'tactics']]
+    #starting_formations = event[event['type'] =='Starting XI'][['team', 'tactics']]
         
     # Merge all stats
     team_stats = pd.merge(completed_passes, total_passes, on='team')
@@ -53,10 +55,124 @@ def calculate_team_stats(event):
     team_stats = pd.merge(team_stats, all_shots, on='team')
     team_stats['duels'] = duels  # Note: this adds total duels to all teams
     team_stats = pd.merge(team_stats, goals, on='team', how='outer').fillna(0)
-    team_stats = (pd.merge(team_stats, starting_formations, on='team')
-                 .rename(columns={'tactics': 'starting_formation'}))
+    # team_stats = (pd.merge(team_stats, starting_formations, on='team')
+    #              .rename(columns={'tactics': 'starting_formation'}))
     
     return team_stats
 
-# Usage:
-# team_stats = calculate_team_stats(events)
+# TODO: Implemet Hyperparameter, wich considers various methods of combining like for example weight the more soon games more
+def calculate_chances_from_played_games(team_stats : pd.DataFrame, considered_matchweeks: ArrayLike, round_decimals: Optional[int] = None ) -> pd.DataFrame :
+    team_stats_considered = team_stats[team_stats['match_week'].isin(considered_matchweeks)]
+    chances = team_stats_considered.groupby('team').agg(
+        avg_completed_passes=('completed_passes', 'mean'),
+        avg_total_passes=('total_passes', 'mean'),
+        avg_pass_comp_pct=('pass_completion_percentage', 'mean'),
+        avg_shots=('Shots', 'mean'),
+        avg_duels=('duels', 'mean'),
+        avg_goals=('Goals', 'mean')
+    )
+    
+    if round_decimals is not None:
+        chances = chances.round(round_decimals)
+    
+    return chances
+
+def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, chances, matches):
+
+    # 1. Extract rows (keep as DataFrames)
+    home_stats = chances.loc[[home_team]].reset_index()  # Removes 'team' index
+    away_stats = chances.loc[[away_team]].reset_index()  # Removes 'team' index
+
+    # 2. Rename columns to avoid duplicates (e.g., 'completed_passes' → 'home_completed_passes')
+    home_stats = home_stats.add_prefix('home_')
+    away_stats = away_stats.add_prefix('away_')
+
+    # 3. Merge into one row
+    prediction_stats = pd.concat([home_stats, away_stats], axis=1)
+
+    # The the actual result:
+    match_result = matches[
+        (matches['home_team'] == home_team) & 
+        (matches['away_team'] == away_team)
+    ][['home_score', 'away_score']]
+
+    home_score = match_result['home_score'].iloc[0]  # Extract scalar value
+    away_score = match_result['away_score'].iloc[0]
+
+    if home_score > away_score:
+        actual_result = 'Home_Victory'
+    elif home_score == away_score:
+        actual_result = 'Draw'
+    else:
+        actual_result = 'Home_Defeat'
+
+    actual_result
+
+    prediction_stats['actual_result'] = actual_result
+
+    return prediction_stats
+
+
+def create_home_away_pairs(team_stats: pd.DataFrame) -> pd.DataFrame:
+    # Get all unique teams
+    all_teams = team_stats['team'].unique().tolist()
+    
+    if len(all_teams) < 18:
+        raise ValueError("team_stats must contain at least 18 unique teams")
+    
+    # Randomly select 9 home teams
+    home_teams = random.sample(all_teams, 9)
+    
+    # Remaining teams (potential away teams)
+    away_pool = [team for team in all_teams if team not in home_teams]
+    
+    # Shuffle and assign one unique away team per home team
+    random.shuffle(away_pool)
+    away_teams = away_pool[:9]  # Take first 9
+    
+    # Create DataFrame
+    pairings = pd.DataFrame({
+        'home_team': home_teams,
+        'away_team': away_teams
+    })
+    
+    return pairings
+
+
+
+def generate_unique_random_array(min_length=1, max_length=34, min_value=1, max_value=34):
+    length = random.randint(min_length, max_length)
+    return random.sample(range(min_value, max_value + 1), length)
+
+
+
+def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_of_weeks_to_simulate: int = 1) -> pd.DataFrame:
+    all_data_points = []
+    
+    for _ in range(amount_of_weeks_to_simulate):  # Simulate multiple weeks
+        # Generate random matchweeks for this simulation
+        random_training_array = generate_unique_random_array()
+        
+        # Calculate team stats for these matchweeks
+        chances = calculate_chances_from_played_games(
+            considered_matchweeks=random_training_array,
+            team_stats=team_stats,
+            round_decimals=None
+        )
+        
+        # Create home-away pairings for this week
+        pairings = create_home_away_pairs(team_stats=team_stats)
+        
+        # Process each pairing
+        for _, pair in pairings.iterrows():
+            data_point = create_test_dataset_entry_based_on_certain_matchweeks(
+                home_team=pair['home_team'],
+                away_team=pair['away_team'],
+                chances=chances,
+                matches=matches
+            )
+            all_data_points.append(data_point)
+    
+    # Combine all data points from all weeks
+    dataset = pd.concat(all_data_points, ignore_index=True)
+    return dataset
