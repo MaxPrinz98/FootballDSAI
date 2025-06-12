@@ -28,18 +28,19 @@ def calculate_team_stats(event):
     )
     possession = (
     event[event['possession_team'].notna()]
-                .groupby('team')
+                .groupby('possession_team')
                 .size()
-                .reset_index(name='Event Count')
+                .reset_index(name='ball_possession')
+                .rename(columns={'possession_team': 'team'})
     )
 
     # Calculate possession percentage
-    #total_events = possession['Event Count'].sum()
-    #possession['Possession'] = (possession['Event Count'] / total_events) * 100
-    #possession['Possession'] = possession['Possession'].round(3)
+    total_events = possession['ball_possession'].sum()
+    possession['Possession'] = (possession['ball_possession'] / total_events) * 100
+    possession['Possession'] = possession['Possession'].round(0)
 
     # Drop the raw count if not needed
-    #possession = possession[['team', 'Possession']]
+    possession = possession[['team', 'Possession']]
 
     # Goals scored by team
     if event[event['type'] == 'Shot'].empty:
