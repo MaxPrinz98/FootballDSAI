@@ -6,20 +6,77 @@ import random
 def calculate_team_stats(event):
     """Calculate team statistics from events DataFrame and return merged stats."""
     
-    all_shots = event[event['type'] == 'Shot'].dropna(axis=1, how='all').groupby(['team']).size().reset_index(name='Shots').sort_values(['team','Shots'], ascending=False)
+    # All shots by team
+    all_shots = (
+        event[event['type'] == 'Shot']
+        .dropna(axis=1, how='all')
+        .groupby(['team'])
+        .size()
+        .reset_index(name='Shots')
+        .sort_values(['team','Shots'], ascending=False)
+    )
 
-    if event[(event['type'] == 'Shot')].empty:
+    xg = (
+    event[
+        (event['type'] == 'Shot') & 
+        (event['shot_statsbomb_xg'].notna())
+    ]
+    .groupby('team')['shot_statsbomb_xg']
+    .sum()
+    .reset_index(name='xG')
+    
+    )
+    possession = (
+    event[event['possession_team'].notna()]
+                .groupby('team')
+                .size()
+                .reset_index(name='Event Count')
+    )
+
+    # Calculate possession percentage
+    #total_events = possession['Event Count'].sum()
+    #possession['Possession'] = (possession['Event Count'] / total_events) * 100
+    #possession['Possession'] = possession['Possession'].round(3)
+
+    # Drop the raw count if not needed
+    #possession = possession[['team', 'Possession']]
+
+    # Goals scored by team
+    if event[event['type'] == 'Shot'].empty:
         goals = pd.DataFrame(columns=['team', 'Goals'])
+        goals_conceded = pd.DataFrame(columns=['team', 'Goals Conceded'])
     else:
+        goal_events = event[
+            (event['type'] == 'Shot') &
+            (event['shot_outcome'] == 'Goal')
+        ]
+        # kann man hier oben evtl anstatt event eif all_shots nehmen für bessere runtime?
+        # Goals scored
         goals = (
-            event[
-                (event['type'] == 'Shot') & 
-                (event['shot_outcome'] == 'Goal')
-            ]
+            goal_events
             .groupby('team')
             .size()
             .reset_index(name='Goals')
         )
+
+        # Get teams in the match
+        teams = event['team'].dropna().unique()
+
+        # Build goals conceded by assuming the conceding team is the *other* team
+        goal_events = goal_events.copy()
+        goal_events['conceding_team'] = goal_events['team'].apply(
+            lambda x: [team for team in teams if team != x][0] if len(teams) == 2 else None
+        )
+
+        # Group by conceding team
+        goals_conceded = (
+            goal_events
+            .groupby('conceding_team')
+            .size()
+            .reset_index(name='Goals Conceded')
+            .rename(columns={'conceding_team': 'team'})
+        )
+
 
     #Still wrong (Duels: 128,  Source: Kicker https://www.kicker.de/bayern-gegen-hsv-2015-bundesliga-2854915/spieldaten)
     duels = duels_per_team = event[(event['type'] == 'Duel')].dropna(axis=1, how='all').shape[0]
@@ -36,6 +93,14 @@ def calculate_team_stats(event):
                 .groupby('team')
                 .size()
                 .reset_index(name='total_passes'))
+    
+    '''total_poss = (event['possession_team']
+                .groupby('team')
+                .size()
+                .reset_index(name='total_possession')
+                )'''
+    
+    
 
     # Calculate completed passes (successful passes with no outcome)
     completed_passes = (event[(event['type'] == 'Pass') & 
@@ -51,10 +116,16 @@ def calculate_team_stats(event):
     team_stats = pd.merge(completed_passes, total_passes, on='team')
     team_stats['pass_completion_percentage'] = (team_stats['completed_passes'] / 
                                               team_stats['total_passes']) * 100
-    
+    #team_stats['possession'] = team_stats['total_poss'] / team_stats[]
     team_stats = pd.merge(team_stats, all_shots, on='team')
     team_stats['duels'] = duels  # Note: this adds total duels to all teams
-    team_stats = pd.merge(team_stats, goals, on='team', how='outer').fillna(0)
+    team_stats = pd.merge(team_stats, xg, on='team', how='outer')
+    team_stats = pd.merge(team_stats, goals, on='team', how='outer')
+    team_stats = pd.merge(team_stats, goals_conceded, on='team', how='outer')
+    team_stats['xG'] = team_stats['xG'].round(2)
+    team_stats = pd.merge(team_stats, possession, on='team', how='outer')
+    team_stats = team_stats.fillna(0)
+
     # team_stats = (pd.merge(team_stats, starting_formations, on='team')
     #              .rename(columns={'tactics': 'starting_formation'}))
     
