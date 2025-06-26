@@ -3,6 +3,17 @@ from numpy.typing import ArrayLike
 from typing import Optional
 import random
 
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+
+
+
 def calculate_team_stats(event):
     """Calculate team statistics from events DataFrame and return merged stats."""
     
@@ -149,7 +160,7 @@ def calculate_chances_from_played_games(team_stats : pd.DataFrame, considered_ma
     
     return chances
 
-def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, chances, matches):
+def calculate_features_based_on_certain_matchweeks(home_team, away_team, chances, matches):
 
     # 1. Extract rows (keep as DataFrames)
     home_stats = chances.loc[[home_team]].reset_index()  # Removes 'team' index
@@ -166,7 +177,7 @@ def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, 
     match_result = matches[
         (matches['home_team'] == home_team) & 
         (matches['away_team'] == away_team)
-    ][['home_score', 'away_score']]
+    ][['home_score', 'away_score','match_week']]
 
     home_score = match_result['home_score'].iloc[0]  # Extract scalar value
     away_score = match_result['away_score'].iloc[0]
@@ -180,6 +191,7 @@ def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, 
 
     actual_result
 
+    prediction_stats['match_week'] = match_result['match_week'].iloc[0]
     prediction_stats['actual_result'] = actual_result
 
     return prediction_stats
@@ -237,7 +249,7 @@ def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_o
         
         # Process each pairing
         for _, pair in pairings.iterrows():
-            data_point = create_test_dataset_entry_based_on_certain_matchweeks(
+            data_point = calculate_features_based_on_certain_matchweeks(
                 home_team=pair['home_team'],
                 away_team=pair['away_team'],
                 chances=chances,
