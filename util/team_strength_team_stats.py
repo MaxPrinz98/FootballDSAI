@@ -3,6 +3,22 @@ from numpy.typing import ArrayLike
 from typing import Optional
 import random
 
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import f1_score, make_scorer
+
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+
 def calculate_team_stats(event):
     """Calculate team statistics from events DataFrame and return merged stats."""
     
@@ -126,7 +142,7 @@ def calculate_team_stats(event):
     team_stats['xG'] = team_stats['xG'].round(2)
     team_stats = pd.merge(team_stats, possession, on='team', how='outer')
     team_stats = team_stats.fillna(0)
-
+    team_stats.drop(columns=['completed_passes']) # dont need and correlation of 1 to total passes
     # team_stats = (pd.merge(team_stats, starting_formations, on='team')
     #              .rename(columns={'tactics': 'starting_formation'}))
     
@@ -149,7 +165,7 @@ def calculate_chances_from_played_games(team_stats : pd.DataFrame, considered_ma
     
     return chances
 
-def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, chances, matches):
+def calculate_features_based_on_certain_matchweeks(home_team, away_team, chances, matches):
 
     # 1. Extract rows (keep as DataFrames)
     home_stats = chances.loc[[home_team]].reset_index()  # Removes 'team' index
@@ -166,7 +182,7 @@ def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, 
     match_result = matches[
         (matches['home_team'] == home_team) & 
         (matches['away_team'] == away_team)
-    ][['home_score', 'away_score']]
+    ][['home_score', 'away_score','match_week']]
 
     home_score = match_result['home_score'].iloc[0]  # Extract scalar value
     away_score = match_result['away_score'].iloc[0]
@@ -180,6 +196,7 @@ def create_test_dataset_entry_based_on_certain_matchweeks(home_team, away_team, 
 
     actual_result
 
+    prediction_stats['match_week'] = match_result['match_week'].iloc[0]
     prediction_stats['actual_result'] = actual_result
 
     return prediction_stats
@@ -220,7 +237,7 @@ def generate_unique_random_array(min_length=1, max_length=34, min_value=1, max_v
 
 def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_of_weeks_to_simulate: int = 1) -> pd.DataFrame:
     all_data_points = []
-    
+    match_week = 1
     for _ in range(amount_of_weeks_to_simulate):  # Simulate multiple weeks
         # Generate random matchweeks for this simulation
         random_training_array = generate_unique_random_array()
@@ -237,59 +254,208 @@ def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_o
         
         # Process each pairing
         for _, pair in pairings.iterrows():
-            data_point = create_test_dataset_entry_based_on_certain_matchweeks(
+            data_point = calculate_features_based_on_certain_matchweeks(
                 home_team=pair['home_team'],
                 away_team=pair['away_team'],
                 chances=chances,
                 matches=matches
             )
+            data_point['match_week'] = match_week
             all_data_points.append(data_point)
+        match_week += 1
+
     
     # Combine all data points from all weeks
     dataset = pd.concat(all_data_points, ignore_index=True)
     return dataset
 
+def generate_real_dataset(team_stats, matches,) -> pd.DataFrame:
+    all_features = []
+    for i in range(1,matches['match_week'].max()+1):
+        team_pairings = matches[matches['match_week'] == i]
+        # Cheating the stats data for first match_week because we cannot predict a game, when no game before is played
+        if i == 1:
+            real_chances = calculate_chances_from_played_games(team_stats=team_stats, considered_matchweeks=list(range(1, matches['match_week'].max()+1)), round_decimals=None)
+            for _, match in team_pairings.iterrows():
+                features = calculate_features_based_on_certain_matchweeks(home_team=match['home_team'],away_team=match['away_team'], chances= real_chances, matches=matches)
+                all_features.append(features)
+        else:
+            real_chances = calculate_chances_from_played_games(team_stats=team_stats, considered_matchweeks=list(range(1, i)), round_decimals=None)
+            for _, match in team_pairings.iterrows():
+                features = calculate_features_based_on_certain_matchweeks(home_team=match['home_team'],away_team=match['away_team'], chances= real_chances, matches=matches)
+                all_features.append(features)
 
-def brier_scores_by_matchweek(matches, alpha=0.1, beta=0.5, gamma=0.1, R_0=1000.,K=20.):
-    brier_records = []
-    # Sort matches by match week
-    matches = matches.sort_values(by='match_week')
+    final_features = pd.concat(all_features, ignore_index=True)
+    return final_features
+
+
+def train_and_evaluate_model(X, y, test_size=0.2, random_state=42):
+    """
+    Train and evaluate multiple models using GridSearchCV with weighted F1 scoring.
     
-    for _, match in matches.iterrows():
-        home = match['home_team']
-        away = match['away_team']
-        home_score = match['home_score']
-        away_score = match['away_score']
-        week = match['match_week']
+    Args:
+        X: Features DataFrame
+        y: Target Series
+        test_size: Proportion for test split
+        random_state: Random seed for reproducibility
+        
+    Returns:
+        Fitted GridSearchCV object containing all results
+    """
+    # Initial split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=test_size,
+        random_state=random_state,
+        shuffle=False
+    )
 
-        # True outcome
-        if home_score > away_score:
-            actual = [1, 0, 0]
-        elif home_score == away_score:
-            actual = [0, 1, 0]
-        else:
-            actual = [0, 0, 1]
+    # Define preprocessing
+    categorical_features = ['home_team', 'away_team']
+    numerical_features = X_train.columns.difference(categorical_features)
 
-        if home_score > away_score:
-            actual_home = 1
-            actual_away = 0
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features),
+            ('num', 'passthrough', numerical_features)
+        ])
+
+    # Safe F1 scorer to handle edge cases
+    def safe_f1_weighted(y_true, y_pred):
+        labels_in_data = list(set(y_true) | set(y_pred))
+        if len(labels_in_data) < 2:
+            return 0.0
+        return f1_score(y_true, y_pred, average='weighted', labels=labels_in_data)
+
+    f1_weight_scorer = make_scorer(safe_f1_weighted)
+
+    print("Class distribution in y_train:", pd.Series(y_train).value_counts())
+
+    # Create pipeline
+    pipe = Pipeline([
+        ('preprocessor', preprocessor),
+        ('model', None)  # Placeholder
+    ])
+
+    # Parameter grid
+    param_grid = [
+        {
+            'model': [RandomForestClassifier()],
+            'model__n_estimators': [100, 400],
+            'model__max_depth': [None, 10]
+        },
+        {
+            'model': [LogisticRegression(max_iter=1000)],
+            'model__C': [0.1, 1, 10],
+            'model__penalty': ['l2']
+        },
+        {
+            'model': [GradientBoostingClassifier()],
+            'model__n_estimators': [50, 100],
+            'model__learning_rate': [0.1, 0.5]
+        },
+        {
+            'model': [SVC(probability=True)],
+            'model__C': [0.1, 1],
+            'model__kernel': ['linear', 'rbf']
+        }
+    ]
+
+    # Configure GridSearch
+    grid = GridSearchCV(
+        pipe,
+        param_grid=param_grid,
+        cv=5,
+        scoring=f1_weight_scorer,
+        error_score='raise',
+        verbose=1,
+        n_jobs=-1,
+        refit=True
+    )
+
+    # Fit models
+    grid.fit(X_train, y_train)
+
+    # Print results
+    print(f"\nBest model: {grid.best_estimator_.named_steps['model']}")
+    print(f"Best params: {grid.best_params_}")
+    print(f"Best CV score: {grid.best_score_:.3f}")
+    
+    return grid, X_test, y_test, X_train, y_train, preprocessor
+
+
+def create_brier_scores(X_test, y_test, model, dataset) -> pd.DataFrame:
+    probabilities_array = model.predict_proba(X_test)
+    probabilities_array.shape  #'Draw', 'Home_Defeat', 'Home_Victory'
+
+    x_probabilities = pd.DataFrame(
+        data=probabilities_array,
+        columns=['Draw', 'Home_Defeat', 'Home_Victory'],
+        index=X_test.index
+    )
+    x_probabilities = x_probabilities.add_prefix('predicted_')
+
+    y_test_proba = pd.get_dummies(y_test, dtype='float64')
+    y_test_proba = y_test_proba.add_prefix('actual_')
+
+    prediction_and_outcome = pd.merge(x_probabilities, y_test_proba, left_index=True, right_index=True)
+    prediction_and_outcome = pd.merge(prediction_and_outcome, dataset['match_week'], left_index=True, right_index=True)
+
+    prediction_and_outcome['brier_score'] = (
+        (prediction_and_outcome['predicted_Draw'] - prediction_and_outcome['actual_Draw']) ** 2 +
+        (prediction_and_outcome['predicted_Home_Defeat'] - prediction_and_outcome['actual_Home_Defeat']) ** 2 +
+        (prediction_and_outcome['predicted_Home_Victory'] - prediction_and_outcome['actual_Home_Victory']) ** 2
+    )
+
+    return prediction_and_outcome
+
+def evaluate_all_models(grid_search, X_test, y_test,X_train, y_train, dataset):
+    """
+    Evaluate all models from GridSearchCV and return DataFrame with Brier scores
+    
+    Args:
+        grid_search: Fitted GridSearchCV object
+        X_test: Test features
+        y_test: True labels
+        dataset: Original dataset with match_week
+        
+    Returns:
+        DataFrame with Brier scores for all models
+    """
+    all_scores = []
+    
+    # Get all candidate estimators from grid search
+    for i, (params, mean_score) in enumerate(zip(
+        grid_search.cv_results_['params'],
+        grid_search.cv_results_['mean_test_score']
+    )):
+        # Get the fitted pipeline
+        fitted_pipeline = grid_search.best_estimator_
+        
+        # Update the pipeline with current parameters
+        current_pipeline = fitted_pipeline.set_params(**params)
+        
+        # Refit the pipeline with these parameters
+        current_pipeline.fit(X_train, y_train)  # You'll need X_train and y_train in scope
+        
+        # Calculate Brier scores
+        try:
+            _, brier_scores = create_brier_scores(X_test, y_test, current_pipeline, dataset)
             
-        elif home_score < away_score:
-            actual_home = 0
-            actual_away = 1
+            # Get model name with parameters
+            model_name = f"{params['model'].__class__.__name__}"
+            for param, value in params.items():
+                if param != 'model':
+                    param_name = param.split('__')[-1]
+                    model_name += f" {param_name}={value}"
             
-        else:
-            actual_home = 0.5
-            actual_away = 0.5
-            
-        # Brier score for this match
-        brier = np.sum((np.array(predicted) - np.array(actual)) ** 2)
-
-        # Store match-level Brier score with match_week info
-        brier_records.append({'match_week': week, 'brier_score': brier})
-
-    # Create DataFrame and average per week
-    brier_df = pd.DataFrame(brier_records)
-    weekly_brier = brier_df.groupby('match_week')['brier_score'].mean().reset_index()
-
-    return weekly_brier
+            # Add to results
+            scores_df = brier_scores.reset_index()
+            scores_df['model'] = model_name
+            scores_df['cv_score'] = mean_score
+            all_scores.append(scores_df)
+        except Exception as e:
+            print(f"Failed to evaluate model {i}: {str(e)}")
+            continue
+    
+    return pd.concat(all_scores) if all_scores else pd.DataFrame()
