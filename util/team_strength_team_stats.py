@@ -220,7 +220,7 @@ def generate_unique_random_array(min_length=1, max_length=34, min_value=1, max_v
 
 def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_of_weeks_to_simulate: int = 1) -> pd.DataFrame:
     all_data_points = []
-    
+    match_week = 1
     for _ in range(amount_of_weeks_to_simulate):  # Simulate multiple weeks
         # Generate random matchweeks for this simulation
         random_training_array = generate_unique_random_array()
@@ -243,53 +243,11 @@ def generate_dataset(team_stats : pd.DataFrame, matches : pd.DataFrame, amount_o
                 chances=chances,
                 matches=matches
             )
+            data_point['match_week'] = match_week
             all_data_points.append(data_point)
+        match_week += 1
+
     
     # Combine all data points from all weeks
     dataset = pd.concat(all_data_points, ignore_index=True)
     return dataset
-
-
-def brier_scores_by_matchweek(matches, alpha=0.1, beta=0.5, gamma=0.1, R_0=1000.,K=20.):
-    brier_records = []
-    # Sort matches by match week
-    matches = matches.sort_values(by='match_week')
-    
-    for _, match in matches.iterrows():
-        home = match['home_team']
-        away = match['away_team']
-        home_score = match['home_score']
-        away_score = match['away_score']
-        week = match['match_week']
-
-        # True outcome
-        if home_score > away_score:
-            actual = [1, 0, 0]
-        elif home_score == away_score:
-            actual = [0, 1, 0]
-        else:
-            actual = [0, 0, 1]
-
-        if home_score > away_score:
-            actual_home = 1
-            actual_away = 0
-            
-        elif home_score < away_score:
-            actual_home = 0
-            actual_away = 1
-            
-        else:
-            actual_home = 0.5
-            actual_away = 0.5
-            
-        # Brier score for this match
-        brier = np.sum((np.array(predicted) - np.array(actual)) ** 2)
-
-        # Store match-level Brier score with match_week info
-        brier_records.append({'match_week': week, 'brier_score': brier})
-
-    # Create DataFrame and average per week
-    brier_df = pd.DataFrame(brier_records)
-    weekly_brier = brier_df.groupby('match_week')['brier_score'].mean().reset_index()
-
-    return weekly_brier
