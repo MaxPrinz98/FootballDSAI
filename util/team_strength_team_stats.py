@@ -142,7 +142,7 @@ def calculate_team_stats(event):
     team_stats['xG'] = team_stats['xG'].round(2)
     team_stats = pd.merge(team_stats, possession, on='team', how='outer')
     team_stats = team_stats.fillna(0)
-    team_stats.drop(['completed_passes']) # dont need and correlation of 1 to total passes
+    team_stats.drop(columns=['completed_passes']) # dont need and correlation of 1 to total passes
     # team_stats = (pd.merge(team_stats, starting_formations, on='team')
     #              .rename(columns={'tactics': 'starting_formation'}))
     
