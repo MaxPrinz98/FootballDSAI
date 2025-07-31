@@ -13,7 +13,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -316,7 +317,7 @@ def train_and_evaluate_model(X, y, test_size=0.2, random_state=42):
 
     preprocessor = ColumnTransformer(
         transformers=[
-            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore',sparse_output=False), categorical_features),
             ('num', 'passthrough', numerical_features)
         ])
 
@@ -355,12 +356,15 @@ def train_and_evaluate_model(X, y, test_size=0.2, random_state=42):
             'model__learning_rate': [0.1, 0.5]
         },
         {
-            'model': [SVC(probability=True)],
-            'model__C': [0.1, 1],
-            'model__kernel': ['linear', 'rbf']
+            'model': [KNeighborsClassifier()],
+            'model__n_neighbors': [1, 3, 5, 10],
+            'model__weights': ['uniform', 'distance']
+        },
+        {
+            'model': [GaussianNB()],
+            # No hyperparameters for grid search
         }
     ]
-
     # Configure GridSearch
     grid = GridSearchCV(
         pipe,
